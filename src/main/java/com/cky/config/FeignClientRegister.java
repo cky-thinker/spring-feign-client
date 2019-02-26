@@ -1,33 +1,33 @@
 package com.cky.config;
 
-import com.cky.util.PropertiesUtil;
 import feign.Request;
 import feign.Retryer;
 import feign.jackson.JacksonDecoder;
 import feign.jackson.JacksonEncoder;
 import io.github.lukehutch.fastclasspathscanner.FastClasspathScanner;
 import io.github.lukehutch.fastclasspathscanner.scanner.ScanResult;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.util.ResourceUtils;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
+import java.util.Properties;
 
 import static feign.Feign.Builder;
 import static feign.Feign.builder;
 
 @Component
 public class FeignClientRegister implements BeanFactoryPostProcessor {
-    private static final Logger LOGGER = LoggerFactory.getLogger(PropertiesUtil.class.getName());
-
     private final String HTTP_HEAD = "http://";
 
     public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
-        String scanPath = PropertiesUtil.getProperties().getProperty("feign.client.scan.path");
+        String scanPath = getProperties().getProperty("feign.client.scan.path");
 
         if (scanPath == null || scanPath.isEmpty()) {
             throw new RuntimeException("feign.client.scan.path配置未找到,请在resources/application.properties中添加该配置.");
@@ -69,5 +69,16 @@ public class FeignClientRegister implements BeanFactoryPostProcessor {
             return Optional.of(scanResult.getNamesOfAllInterfaceClasses());
         }
         return Optional.empty();
+    }
+
+    private Properties getProperties() {
+        Properties properties = new Properties();
+        try {
+            File file = ResourceUtils.getFile("classpath:application.properties");
+            properties.load(new FileInputStream(file));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        return properties;
     }
 }
