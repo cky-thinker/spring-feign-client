@@ -29,6 +29,6 @@ com.cky.config.FeignClientRegister
 - 在resources/application.properties 中添加配置项: feign.client.scan.path = xxx 设置自定义api接口扫描路径
 - 在配置的api接口包中创建接口
 - 给接口添加@FeignApi注解并指定url,具体可以参考该示例
-- 在接口中添加Feign风格的方法 [Feign注解使用指南](https://github.com/OpenFeign/feign)
+- 在接口中添加Feign风格的方法 [Feign注解使用指南](https://github.com/OpenFeign/feign)[中文版指南](https://www.cnblogs.com/chenkeyu/p/9017996.html)
 - 在项目中使用@Autowired 注入Api使用即可
 
