@@ -29,6 +29,10 @@ public class FeignClientRegister implements BeanFactoryPostProcessor {
     public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
         String scanPath = PropertiesUtil.getProperties().getProperty("feign.client.scan.path");
 
+        if (scanPath == null || scanPath.isEmpty()) {
+            throw new RuntimeException("feign.client.scan.path配置未找到,请在resources/application.properties中添加该配置.");
+        }
+
         scanFeignApi(scanPath).ifPresent((feignApiStrs) -> {
             Builder feignBuilder = getFeignBuilder();
             feignApiStrs.forEach((feignApiStr) -> {
@@ -48,7 +52,6 @@ public class FeignClientRegister implements BeanFactoryPostProcessor {
             });
         });
     }
-
 
 
     private Builder getFeignBuilder() {
