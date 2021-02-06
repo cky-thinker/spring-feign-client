@@ -1,84 +1,118 @@
 package com.cky.config;
 
-import feign.Request;
-import feign.Retryer;
-import feign.jackson.JacksonDecoder;
-import feign.jackson.JacksonEncoder;
-import io.github.lukehutch.fastclasspathscanner.FastClasspathScanner;
-import io.github.lukehutch.fastclasspathscanner.scanner.ScanResult;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.springframework.beans.BeansException;
-import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
-import org.springframework.stereotype.Component;
-import org.springframework.util.ResourceUtils;
+import org.springframework.beans.factory.support.AbstractBeanDefinition;
+import org.springframework.beans.factory.support.BeanDefinitionBuilder;
+import org.springframework.beans.factory.support.BeanDefinitionRegistry;
+import org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor;
+import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.core.io.support.ResourcePatternResolver;
+import org.springframework.core.type.ClassMetadata;
+import org.springframework.core.type.classreading.CachingMetadataReaderFactory;
+import org.springframework.core.type.classreading.MetadataReader;
+import org.springframework.core.type.classreading.MetadataReaderFactory;
+import org.springframework.util.ClassUtils;
 
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.util.List;
-import java.util.Optional;
-import java.util.Properties;
 
-import static feign.Feign.Builder;
-import static feign.Feign.builder;
+public class FeignClientRegister implements BeanDefinitionRegistryPostProcessor {
+    private static final String DEFAULT_RESOURCE_PATTERN = "**/*.class";
 
-@Component
-public class FeignClientRegister implements BeanFactoryPostProcessor {
-    private final String HTTP_HEAD = "http://";
+    private static final String FEIGN_API_ANNOTATION = "com.cky.config.FeignApi";
 
-    public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
-        String scanPath = getProperties().getProperty("feign.client.scan.path");
+    protected final Log logger = LogFactory.getLog(getClass());
 
-        if (scanPath == null || scanPath.isEmpty()) {
-            throw new RuntimeException("feign.client.scan.path配置未找到,请在resources/application.properties中添加该配置.");
+    private final ConfigurableEnvironment environment;
+
+    private ResourcePatternResolver resourcePatternResolver;
+
+    private MetadataReaderFactory metadataReaderFactory;
+
+    public FeignClientRegister(ConfigurableEnvironment environment) {
+        this.environment = environment;
+    }
+
+    @Override
+    public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry beanDefinitionRegistry) throws BeansException {
+        String basePackage = environment.getProperty("feign.client.scan.path");
+        if (basePackage == null || basePackage.isEmpty()) {
+            throw new RuntimeException("feign.client.scan.path配置未找到");
         }
 
-        scanFeignApi(scanPath).ifPresent((feignApiStrs) -> {
-            Builder feignBuilder = getFeignBuilder();
-            feignApiStrs.forEach((feignApiStr) -> {
-                try {
-                    Class<?> feignApi = Class.forName(feignApiStr);
-                    String url = feignApi.getAnnotation(FeignApi.class).serviceUrl();
-                    if (url.indexOf(HTTP_HEAD) != 0) {
-                        url = HTTP_HEAD + url;
-                    }
+        String packageSearchPath = ResourcePatternResolver.CLASSPATH_ALL_URL_PREFIX +
+                resolveBasePackage(basePackage) + '/' + DEFAULT_RESOURCE_PATTERN;
+        Resource[] resources = getResources(packageSearchPath);
 
-                    Object feignApiBean = feignBuilder.target(feignApi, url);
+        for (Resource resource : resources) {
+            if (!resource.isReadable()) {
+                logger.info("Ignored because not readable: " + resource);
+            }
 
-                    beanFactory.registerSingleton(feignApi.getName(), feignApiBean);
-                } catch (ClassNotFoundException e) {
-                    throw new RuntimeException(e);
-                }
-            });
-        });
-    }
-
-
-    private Builder getFeignBuilder() {
-        return builder().encoder(new JacksonEncoder())
-                .decoder(new JacksonDecoder())
-                .options(new Request.Options(1000, 3500))
-                .retryer(new Retryer.Default(5000, 5000, 3));
-    }
-
-    private Optional<List<String>> scanFeignApi(String scanPath) {
-        ScanResult scanResult = new FastClasspathScanner(scanPath).matchClassesWithAnnotation(FeignApi.class, (clz) -> {
-        }).scan();
-
-        if (scanResult != null) {
-            return Optional.of(scanResult.getNamesOfAllInterfaceClasses());
+            MetadataReader metadataReader = getMetadataReader(resource);
+            if (isCandidateComponent(metadataReader)) {
+                Class<? extends ClassMetadata> clz = loadClass(metadataReader);
+                BeanDefinitionBuilder baseBuilder = BeanDefinitionBuilder.genericBeanDefinition(FeignClientFactoryBean.class);
+                AbstractBeanDefinition beanDefinition = baseBuilder.addConstructorArgValue(clz).addConstructorArgValue(environment).getBeanDefinition();
+                beanDefinitionRegistry.registerBeanDefinition(clz.getName(), beanDefinition);
+            }
         }
-        return Optional.empty();
     }
 
-    private Properties getProperties() {
-        Properties properties = new Properties();
+    private Class<? extends ClassMetadata> loadClass(MetadataReader metadataReader) {
+        String clzName = metadataReader.getClassMetadata().getClassName();
         try {
-            File file = ResourceUtils.getFile("classpath:application.properties");
-            properties.load(new FileInputStream(file));
+            return (Class<? extends ClassMetadata>) Class.forName(clzName);
+        } catch (ClassNotFoundException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+
+    protected String resolveBasePackage(String basePackage) {
+        return ClassUtils.convertClassNameToResourcePath(this.environment.resolveRequiredPlaceholders(basePackage));
+    }
+
+    private Resource[] getResources(String packageSearchPath) {
+        try {
+            return getResourcePatternResolver().getResources(packageSearchPath);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        return properties;
+    }
+
+    private MetadataReader getMetadataReader(Resource resource) {
+        try {
+            return getMetadataReaderFactory().getMetadataReader(resource);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private boolean isCandidateComponent(MetadataReader metadataReader) {
+        return metadataReader.getAnnotationMetadata().hasAnnotation(FEIGN_API_ANNOTATION);
+    }
+
+    private ResourcePatternResolver getResourcePatternResolver() {
+        if (this.resourcePatternResolver == null) {
+            this.resourcePatternResolver = new PathMatchingResourcePatternResolver();
+        }
+        return this.resourcePatternResolver;
+    }
+
+    public final MetadataReaderFactory getMetadataReaderFactory() {
+        if (this.metadataReaderFactory == null) {
+            this.metadataReaderFactory = new CachingMetadataReaderFactory();
+        }
+        return this.metadataReaderFactory;
+    }
+
+    @Override
+    public void postProcessBeanFactory(ConfigurableListableBeanFactory configurableListableBeanFactory) throws BeansException {
+
     }
 }

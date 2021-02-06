@@ -9,7 +9,7 @@ import feign.RequestLine;
 
 import java.util.Map;
 
-@FeignApi(serviceUrl = "http://apis.juhe.cn/")
+@FeignApi(serviceUrl = "${mobile.url}")
 public interface MobileApi {
 
     @RequestLine("GET /mobile/get?phone={phone}&dtype={dtype}&key={key}")

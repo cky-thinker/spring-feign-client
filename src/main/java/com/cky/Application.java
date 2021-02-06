@@ -25,7 +25,5 @@ public class Application {
         LOGGER.info("--- 使用map提交示例 ---");
         result = mobileApi.getByQueryMap(of("phone", "13038498443", "dtype", "", "key", "d62771a0532fdb49a207971786ea2b00"));
         LOGGER.info(result.toString());
-
-
     }
 }
